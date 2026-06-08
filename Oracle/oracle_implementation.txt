@@ -1,0 +1,75 @@
+follow doc + must have oracle version in cluster
+1. go to oracle container-registry:  https://container-registry.oracle.com
+2. login / create account for the first time, need to verify email.
+3. Homepage -> database -> enterprise-> select Language -> take license (green mark will show)
+    [You last accepted the Oracle Standard Terms and Restrictions on 06/03/2026 at 06:09 AM Coordinated Universal Time (UTC).]
+
+4. generate token -> copy it to a safer place
+5. create secret: 
+--docker-username="<your-oracle-account-email>"  = takia@appscode.com
+--docker-password='<token-from-container-registry.oracle.com>' = secret that is copied from oracle
+--docker-email="<your-oracle-account-email>" = takiaesha03@gmail.com
+
+    
+ kubectl create secret docker-registry oraclecred \
+  --docker-server=container-registry.oracle.com \
+  --docker-username="<your-oracle-account-email>" \   
+  --docker-password='<token-from-container-registry.oracle.com>' \
+  --docker-email="<your-oracle-account-email>" \
+  --namespace=demo
+
+6. deploy standalone-oracle , just mention imagePullSecret = oraclecred. take huge time to get ready 
+
+7. exec into a pod and run commands: 
+kubectl exec -it -n demo pods/oracle-0 -- bash 
+Defaulted container "oracle" out of: oracle, oracle-init (init)
+bash-4.2$ sqlplus / as sysdba
+
+SQL*Plus: Release 21.0.0.0.0 - Production on Thu Jun 4 04:59:49 2026
+Version 21.3.0.0.0
+
+Copyright (c) 1982, 2021, Oracle.  All rights reserved.
+
+
+Connected to:
+Oracle Database 21c Enterprise Edition Release 21.0.0.0.0 - Production
+Version 21.3.0.0.0
+
+SQL> SHOW PDBS;
+
+    CON_ID CON_NAME			  OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+	 2 PDB$SEED			  READ ONLY  NO
+	 3 PDB				  READ WRITE NO
+
+##creating table and inserting data into it
+
+SQL> create table popo(id number, name varchar2 (30));
+Table created.
+SQL> insert into popo values (12, 'lotus');
+
+1 row created.
+SQL> insert all
+  2  into popo values(13, 'lily')
+  3  into popo values (14, 'rose')
+  4  into popo values (15, 'camelia')
+  5  select * from dual
+  6  commit;
+
+3 rows created.
+
+SQL> select * from popo;
+
+	ID NAME
+---------- ------------------------------
+	11 orchid
+	12 lotus
+	13 lily
+	14 rose
+	15 camelia
+SQL> select count (*) from popo;
+
+  COUNT(*)
+----------
+	 5
+

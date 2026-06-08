@@ -1,0 +1,11 @@
+apiVersion: v1
+data:
+  .dockerconfigjson: eyJhdXRocyI6eyJjb250YWluZXItcmVnaXN0cnkub3JhY2xlLmNvbSI6eyJ1c2VybmFtZSI6InRha2lhMTExIiwicGFzc3dvcmQiOiJkb2NrZXIxMjMiLCJlbWFpbCI6Ilx1MDAzY3Rha2lhZXNoYTAzQGdtYWlsLmNvbVx1MDAzZSIsImF1dGgiOiJkR0ZyYVdFeE1URTZaRzlqYTJWeU1USXoifX19
+kind: Secret
+metadata:
+  creationTimestamp: "2026-06-03T06:17:06Z"
+  name: orclcred
+  namespace: demo
+  resourceVersion: "1413655"
+  uid: 5ee82151-410d-433d-a398-c04a645faa66
+type: kubernetes.io/dockerconfigjsons

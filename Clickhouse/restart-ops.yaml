@@ -1,0 +1,11 @@
+apiVersion: ops.kubedb.com/v1alpha1
+kind: ClickHouseOpsRequest
+metadata:
+  name: restart
+  namespace: dm
+spec:
+  type: Restart
+  databaseRef:
+    name: clickhouse-prod
+  timeout: 3m
+  apply: Always

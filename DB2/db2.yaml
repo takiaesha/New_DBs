@@ -1,0 +1,84 @@
+# apiVersion: kubedb.com/v1alpha2
+# kind: DB2
+# metadata:
+#   name: db2
+#   namespace: demo
+# spec:
+#   version: 11.5.8.0
+#   storageType: Durable
+#   storage:
+#     storageClassName: standard
+#     accessModes:
+#       - ReadWriteOnce
+#     resources:
+#       requests:
+#         storage: 10Gi
+#   deletionPolicy: Delete
+
+
+
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: db2
+  namespace: demo
+spec:
+  version: "11.5.8.0"
+  replicas: 1
+  authSecret:
+    name: db2-auth
+  storageType: Durable
+  storage:
+    storageClassName: local-path
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  podTemplate:
+    metadata:
+      annotations:
+        passMe: ToDatabasePod
+    controller:
+      annotations:
+        passMe: ToPetSet
+    spec:
+      serviceAccountName: my-custom-sa
+      schedulerName: my-scheduler
+      nodeSelector:
+        disktype: ssd
+      imagePullSecrets:
+      - name: myregistrykey
+      containers:
+      - name: db2
+        env:
+        - name: DB2INSTANCE
+          value: db2inst1
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "2"
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: database
+        effect: NoSchedule
+      volumes:
+      - name: custom-volume
+        emptyDir: {}
+      podPlacementPolicy:
+        name: default
+  serviceTemplates:
+  - alias: primary
+    metadata:
+      annotations:
+        passMe: ToService
+    spec:
+      type: ClusterIP
+      ports:
+      - name: db2
+        port: 50000
+  deletionPolicy: WipeOut

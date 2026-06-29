@@ -1,0 +1,1012 @@
+https://github.com/kubedb/docs/tree/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/
+
+db2https://github.com/kubedb/docs/blob/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/db2/concepts/db2.md
+
+https://github.com/kubedb/docs/blob/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/db2/custom-rbac/using-custom-rbac.md
+
+https://github.com/kubedb/docs/blob/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/db2/private-registry/using-private-registry.md
+
+
+https://github.com/kubedb/docs/blob/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/db2/quickstart/quickstart.md
+
+
+https://github.com/kubedb/docs/blob/eb13597bd5d90341347f9e872018ac66a18e4a6d/docs/guides/db2/quickstart/rbac.md
+
+
+---
+title: Run DB2 using Private Registry
+menu:
+  docs_{{ .version }}:
+    identifier: db2-using-private-registry
+    name: Using Private Registry
+    parent: db2-private-registry
+    weight: 10
+menu_name: docs_{{ .version }}
+section_menu_id: guides
+---
+
+> New to KubeDB? Please start [here](/docs/README.md).
+
+# Using Private Docker Registry
+
+KubeDB supports using private Docker registries. This tutorial will show you how to run KubeDB managed DB2 database using private Docker images.
+
+## Before You Begin
+
+At first, you need to have a Kubernetes cluster, and the kubectl command-line tool must be configured to communicate with your cluster. If you do not already have a cluster, you can create one by using [kind](https://kind.sigs.k8s.io/docs/user/quick-start/).
+
+To keep things isolated, this tutorial uses a separate namespace called `demo` throughout this tutorial.
+
+```bash
+$ kubectl create ns demo
+namespace/demo created
+
+$ kubectl get ns demo
+NAME    STATUS  AGE
+demo    Active  5s
+```
+
+> Note: YAML files used in this tutorial are stored in [docs/examples/db2](https://github.com/kubedb/docs/tree/{{< param "info.version" >}}/docs/examples/db2) folder in GitHub repository [kubedb/docs](https://github.com/kubedb/docs).
+
+## Prepare Private Docker Registry
+
+You need to have a private Docker registry to host the DB2 images. You can use:
+
+- A private repository in [Docker Hub](https://docs.docker.com/docker-hub/repos/#private-repositories)
+- A self-hosted [Docker Registry](https://docs.docker.com/registry/)
+- A cloud provider's container registry (AWS ECR, Google GCR, etc.)
+
+You have to push the required images from KubeDB's [Docker hub account](https://hub.docker.com/r/kubedb/) into your private registry. For DB2, push the `DB_IMAGE` and `COORDINATOR_IMAGE` of the following DB2Versions (where `deprecated` is not true) to your private registry.
+
+```bash
+$ kubectl get db2versions -o=custom-columns=NAME:.metadata.name,VERSION:.spec.version,DB_IMAGE:.spec.db.image,COORDINATOR_IMAGE:.spec.coordinator.image,DEPRECATED:.spec.deprecated
+NAME         VERSION   DB_IMAGE                 COORDINATOR_IMAGE                          DEPRECATED
+11.5.8.0       11.5.8.0    kubedb/db2:11.5.8.0        ghcr.io/kubedb/db2-coordinator:v0.5.0-ubi  <none>
+```
+
+## Create ImagePullSecret
+
+ImagePullSecrets is a type of a Kubernetes Secret whose sole purpose is to pull private images from a Docker registry. It allows you to specify the url of the docker registry, credentials for logging in and the image name of your private docker image.
+
+Run the following command, substituting the appropriate uppercase values to create an image pull secret for your private Docker registry:
+
+```bash
+$ kubectl create secret docker-registry -n demo myregistrykey \
+  --docker-server=DOCKER_REGISTRY_SERVER \
+  --docker-username=DOCKER_USER \
+  --docker-email=DOCKER_EMAIL \
+  --docker-password=DOCKER_PASSWORD
+secret/myregistrykey created
+```
+
+If you wish to follow other ways to pull private images see [official docs](https://kubernetes.io/docs/concepts/containers/images/) of Kubernetes.
+
+Verify the image pull secret is created:
+
+```bash
+$ kubectl get secret -n demo myregistrykey
+NAME             TYPE                             DATA   AGE
+myregistrykey    kubernetes.io/dockercfg         1      5m
+```
+
+## Install KubeDB Operator
+
+When installing KubeDB operator, set the flags `--docker-registry` and `--image-pull-secret` to appropriate values. Follow the steps to [install KubeDB operator](/docs/setup/README.md) properly in cluster so that it points to the DOCKER_REGISTRY you wish to pull images from.
+
+## Create DB2Version CRD
+
+KubeDB uses images specified in DB2Version CRD for the database container and the coordinator container for health checking. You have to create a DB2Version CRD specifying images from your private registry. Then, you have to point this DB2Version CRD in `spec.version` field of DB2 object. For more details about DB2Version CRD, please visit [here](/docs/guides/db2/concepts/catalog.md).
+
+Here is an example of DB2Version CRD. Replace `PRIVATE_REGISTRY` with your private registry.
+
+```yaml
+apiVersion: catalog.kubedb.com/v1alpha1
+kind: DB2Version
+metadata:
+  name: "11.5.8.0"
+spec:
+  version: "11.5.8.0"
+  db:
+    image: PRIVATE_REGISTRY/db2:11.5.9
+  coordinator:
+    image: PRIVATE_REGISTRY/db2-coordinator:v0.5.0-ubi
+  deprecated: false
+```
+
+Now, create the DB2Version CRD:
+
+```bash
+$ kubectl apply -f pvt-db2version.yaml
+db2version.catalog.kubedb.com/11.5.9 created
+```
+
+Verify the DB2Version is created:
+
+```bash
+$ kubectl get db2version
+NAME        VERSION   DB_IMAGE                           COORDINATOR_IMAGE                               DEPRECATED
+11.5.8.0      11.5.8.0    PRIVATE_REGISTRY/db2:11.5.8.0        PRIVATE_REGISTRY/db2-coordinator:v0.5.0-ubi     false
+```
+
+## Deploy DB2 from Private Registry
+
+While deploying DB2 from private repository, you have to add `myregistrykey` secret in DB2 `spec.podTemplate.spec.imagePullSecrets` and specify your private version in `spec.version` field.
+
+Below is the DB2 object we will create in this tutorial:
+
+```yaml
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: pvt-reg-db2
+  namespace: demo
+spec:
+  version: "11.5.8.0"
+  storageType: Durable
+  storage:
+    storageClassName: "standard"
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  podTemplate:
+    spec:
+      imagePullSecrets:
+      - name: myregistrykey
+  deletionPolicy: Delete
+```
+
+Now run the command to create this DB2 object:
+
+```bash
+$ kubectl create -f https://github.com/kubedb/docs/raw/{{< param "info.version" >}}/docs/examples/db2/private-registry/pvt-reg-db2.yaml
+db2.kubedb.com/pvt-reg-db2 created
+```
+
+To check if the images pulled successfully from the repository, see if the DB2 is in Running state:
+
+```bash
+$ kubectl get pods -n demo --selector="app.kubernetes.io/instance=pvt-reg-db2"
+NAME             READY     STATUS    RESTARTS   AGE
+pvt-reg-db2-0    1/1       Running   0          3m
+```
+
+Wait for the DB2 instance to be ready:
+
+```bash
+$ kubectl get db2 -n demo pvt-reg-db2
+NAME           VERSION   STATUS    AGE
+pvt-reg-db2    11.5.8.0    Running   3m
+```
+
+Check the pod logs to verify the database is ready:
+
+## Verify Image Pull
+
+To verify that KubeDB has successfully pulled the private images from your registry, you can inspect the pod events:
+
+```bash
+$ kubectl describe pod -n demo pvt-reg-db2-0
+```
+
+Look for events like:
+```
+Successfully pulled image "PRIVATE_REGISTRY/db2:11.5.9" in XXms
+Successfully pulled image "PRIVATE_REGISTRY/db2-coordinator:v0.5.0-ubi" in XXms
+```
+
+## Cleaning up
+
+To cleanup the Kubernetes resources created by this tutorial, run:
+
+```bash
+$ kubectl patch -n demo db2/pvt-reg-db2 -p '{"spec":{"deletionPolicy":"WipeOut"}}' --type="merge"
+$ kubectl delete -n demo db2/pvt-reg-db2
+
+$ kubectl delete -n demo db2version 11.5.8.0
+
+$ kubectl delete secret -n demo myregistrykey
+
+$ kubectl delete ns demo
+```
+
+## Next Steps
+
+- Learn how to use KubeDB to run DB2 [here](/docs/guides/db2/README.md).
+- Learn about [custom RBAC](/docs/guides/db2/custom-rbac/using-custom-rbac.md) for DB2.
+- Want to hack on KubeDB? Check our [contribution guidelines](/docs/CONTRIBUTING.md).
+
+
+
+---
+title: DB2 CRD
+menu:
+  docs_{{ .version }}:
+    identifier: db2-db2-concepts
+    name: DB2
+    parent: db2-concepts-db2
+    weight: 10
+menu_name: docs_{{ .version }}
+section_menu_id: guides
+---
+
+> New to KubeDB? Please start [here](/docs/README.md).
+
+# DB2
+
+## What is DB2
+
+`DB2` is a Kubernetes `CustomResourceDefinition` (CRD) provided by KubeDB. It lets you run and manage IBM DB2 with Kubernetes-native declarative APIs.
+
+## DB2 Spec
+
+Like all Kubernetes resources, a `DB2` object needs `apiVersion`, `kind`, and `metadata`, and it uses `.spec` to define the desired state.
+
+Below is an example DB2 object with all optional fields.
+
+```yaml
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: db2
+  namespace: demo
+spec:
+  version: "11.5.8.0"
+  replicas: 1
+  authSecret:
+    name: db2-auth
+  storageType: Durable
+  storage:
+    storageClassName: standard
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  podTemplate:
+    metadata:
+      annotations:
+        passMe: ToDatabasePod
+    controller:
+      annotations:
+        passMe: ToPetSet
+    spec:
+      serviceAccountName: my-custom-sa
+      schedulerName: my-scheduler
+      nodeSelector:
+        disktype: ssd
+      imagePullSecrets:
+      - name: myregistrykey
+      containers:
+      - name: db2
+        env:
+        - name: DB2INSTANCE
+          value: db2inst1
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "2"
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: database
+        effect: NoSchedule
+      volumes:
+      - name: custom-volume
+        emptyDir: {}
+      podPlacementPolicy:
+        name: default
+  serviceTemplates:
+  - alias: primary
+    metadata:
+      annotations:
+        passMe: ToService
+    spec:
+      type: ClusterIP
+      ports:
+      - name: db2
+        port: 50000
+  deletionPolicy: Delete
+```
+
+### spec.version
+
+`spec.version` is a required field that specifies the name of the [DB2Version](/docs/guides/db2/concepts/catalog.md) CRD where the docker images are specified.
+
+### spec.replicas
+
+`spec.replicas` specifies the number of DB2 replicas (pods) to be created for the DB2 instance. For standalone deployment, this is typically set to 1.
+
+### spec.authSecret
+
+`spec.authSecret` is an optional field that points to a Secret used to hold credentials for DB2 user. If not set, KubeDB operator creates a new Secret named `{db2-object-name}-auth` for storing the password.
+
+We can use this field in 3 modes:
+
+1. Using an external secret:
+```yaml
+authSecret:
+  name: <your-created-auth-secret-name>
+  externallyManaged: true
+```
+
+2. Specifying the secret name only:
+```yaml
+authSecret:
+  name: <intended-auth-secret-name>
+```
+
+3. Let KubeDB do everything (omit this field).
+
+The auth secret should contain `username` and `password` keys with base64-encoded values.
+
+### spec.storageType
+
+`spec.storageType` is an optional field that specifies the type of storage to use for the database. It can be either `Durable` or `Ephemeral`. The default value is `Durable`. If `Ephemeral` is used, KubeDB will create the DB2 instance using [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) volume.
+
+### spec.storage
+
+If `spec.storageType` is set to `Durable`, then `spec.storage` field is required. This field specifies the StorageClass and PVC configuration for persistent storage.
+
+- `spec.storage.storageClassName` is the name of the StorageClass used to provision PVCs
+- `spec.storage.accessModes` uses the same conventions as Kubernetes PVCs (typically ReadWriteOnce)
+- `spec.storage.resources` specifies the storage capacity requirements
+
+To learn how to configure `spec.storage`, visit: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims
+
+### spec.podTemplate
+
+KubeDB allows providing a template for DB2 pods through `spec.podTemplate`. KubeDB operator will pass the information provided in `spec.podTemplate` to the PetSet created for the DB2 database.
+
+KubeDB accepts following fields to set in `spec.podTemplate`:
+
+- metadata
+  - annotations (pod's annotation)
+- controller
+  - annotations (petset's annotation)
+- spec:
+  - containers
+  - volumes
+  - podPlacementPolicy
+  - serviceAccountName
+  - initContainers
+  - imagePullSecrets
+  - nodeSelector
+  - schedulerName
+  - tolerations
+  - priorityClassName
+  - priority
+  - securityContext
+
+#### spec.podTemplate.spec.tolerations
+
+The `spec.podTemplate.spec.tolerations` is an optional field used to specify the pod's tolerations.
+
+#### spec.podTemplate.spec.volumes
+
+The `spec.podTemplate.spec.volumes` is an optional field used to provide the list of volumes that can be mounted by containers belonging to the pod.
+
+#### spec.podTemplate.spec.podPlacementPolicy
+
+`spec.podTemplate.spec.podPlacementPolicy` is an optional field used to provide the reference of the `podPlacementPolicy`. The `name` of the podPlacementPolicy is referred under this attribute. This will be used by the PetSet controller to place the DB2 pods throughout the region, zone & nodes according to the policy.
+
+```yaml
+spec:
+  podPlacementPolicy:
+    name: default
+```
+
+#### spec.podTemplate.spec.nodeSelector
+
+`spec.podTemplate.spec.nodeSelector` is an optional field that specifies a map of key-value pairs. For the pod to be eligible to run on a node, the node must have each of the indicated key-value pairs as labels.
+
+#### spec.podTemplate.spec.containers
+
+The `spec.podTemplate.spec.containers` can be used to provide the list of containers and their configurations for the database pod.
+
+##### spec.podTemplate.spec.containers[].name
+
+The `spec.podTemplate.spec.containers[].name` field specifies the name of the container as a DNS_LABEL. Each container in a pod must have a unique name.
+
+##### spec.podTemplate.spec.containers[].env
+
+`spec.podTemplate.spec.containers[].env` is an optional field that specifies environment variables to pass to the DB2 containers.
+
+##### spec.podTemplate.spec.containers[].resources
+
+`spec.podTemplate.spec.containers[].resources` is an optional field used to request compute resources (CPU and memory) required by containers of the database pods.
+
+### spec.serviceTemplates
+
+You can provide templates for the services created by KubeDB operator for DB2 through `spec.serviceTemplates`. This allows you to set the type and other properties of the services.
+
+KubeDB allows following fields to set in `spec.serviceTemplates`:
+
+- `alias` represents the identifier of the service (typically `primary`)
+- metadata:
+    - labels
+    - annotations
+- spec:
+    - type
+    - ports
+    - clusterIP
+    - externalIPs
+    - loadBalancerIP
+    - externalTrafficPolicy
+
+### spec.deletionPolicy
+
+`deletionPolicy` gives flexibility to control what happens when you delete a DB2 CRD. KubeDB provides following deletion policies:
+
+- DoNotTerminate
+- WipeOut
+- Halt
+- Delete
+
+When `deletionPolicy` is `DoNotTerminate`, KubeDB takes advantage of `ValidationWebhook` feature in Kubernetes to prevent deletion of the database as long as the policy is set to `DoNotTerminate`.
+
+## Next Steps
+
+- Learn how to use KubeDB to run DB2 [here](/docs/guides/db2/README.md).
+- Want to hack on KubeDB? Check our [contribution guidelines](/docs/CONTRIBUTING.md).
+
+
+---
+title: DB2 CRD
+menu:
+  docs_{{ .version }}:
+    identifier: db2-db2-concepts
+    name: DB2
+    parent: db2-concepts-db2
+    weight: 10
+menu_name: docs_{{ .version }}
+section_menu_id: guides
+---
+
+> New to KubeDB? Please start [here](/docs/README.md).
+
+# DB2
+
+## What is DB2
+
+`DB2` is a Kubernetes `CustomResourceDefinition` (CRD) provided by KubeDB. It lets you run and manage IBM DB2 with Kubernetes-native declarative APIs.
+
+## DB2 Spec
+
+Like all Kubernetes resources, a `DB2` object needs `apiVersion`, `kind`, and `metadata`, and it uses `.spec` to define the desired state.
+
+Below is an example DB2 object with all optional fields.
+
+```yaml
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: db2
+  namespace: demo
+spec:
+  version: "11.5.8.0"
+  replicas: 1
+  authSecret:
+    name: db2-auth
+  storageType: Durable
+  storage:
+    storageClassName: standard
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  podTemplate:
+    metadata:
+      annotations:
+        passMe: ToDatabasePod
+    controller:
+      annotations:
+        passMe: ToPetSet
+    spec:
+      serviceAccountName: my-custom-sa
+      schedulerName: my-scheduler
+      nodeSelector:
+        disktype: ssd
+      imagePullSecrets:
+      - name: myregistrykey
+      containers:
+      - name: db2
+        env:
+        - name: DB2INSTANCE
+          value: db2inst1
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "2"
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: database
+        effect: NoSchedule
+      volumes:
+      - name: custom-volume
+        emptyDir: {}
+      podPlacementPolicy:
+        name: default
+  serviceTemplates:
+  - alias: primary
+    metadata:
+      annotations:
+        passMe: ToService
+    spec:
+      type: ClusterIP
+      ports:
+      - name: db2
+        port: 50000
+  deletionPolicy: Delete
+```
+
+### spec.version
+
+`spec.version` is a required field that specifies the name of the [DB2Version](/docs/guides/db2/concepts/catalog.md) CRD where the docker images are specified.
+
+### spec.replicas
+
+`spec.replicas` specifies the number of DB2 replicas (pods) to be created for the DB2 instance. For standalone deployment, this is typically set to 1.
+
+### spec.authSecret
+
+`spec.authSecret` is an optional field that points to a Secret used to hold credentials for DB2 user. If not set, KubeDB operator creates a new Secret named `{db2-object-name}-auth` for storing the password.
+
+We can use this field in 3 modes:
+
+1. Using an external secret:
+```yaml
+authSecret:
+  name: <your-created-auth-secret-name>
+  externallyManaged: true
+```
+
+2. Specifying the secret name only:
+```yaml
+authSecret:
+  name: <intended-auth-secret-name>
+```
+
+3. Let KubeDB do everything (omit this field).
+
+The auth secret should contain `username` and `password` keys with base64-encoded values.
+
+### spec.storageType
+
+`spec.storageType` is an optional field that specifies the type of storage to use for the database. It can be either `Durable` or `Ephemeral`. The default value is `Durable`. If `Ephemeral` is used, KubeDB will create the DB2 instance using [emptyDir](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir) volume.
+
+### spec.storage
+
+If `spec.storageType` is set to `Durable`, then `spec.storage` field is required. This field specifies the StorageClass and PVC configuration for persistent storage.
+
+- `spec.storage.storageClassName` is the name of the StorageClass used to provision PVCs
+- `spec.storage.accessModes` uses the same conventions as Kubernetes PVCs (typically ReadWriteOnce)
+- `spec.storage.resources` specifies the storage capacity requirements
+
+To learn how to configure `spec.storage`, visit: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims
+
+### spec.podTemplate
+
+KubeDB allows providing a template for DB2 pods through `spec.podTemplate`. KubeDB operator will pass the information provided in `spec.podTemplate` to the PetSet created for the DB2 database.
+
+KubeDB accepts following fields to set in `spec.podTemplate`:
+
+- metadata
+  - annotations (pod's annotation)
+- controller
+  - annotations (petset's annotation)
+- spec:
+  - containers
+  - volumes
+  - podPlacementPolicy
+  - serviceAccountName
+  - initContainers
+  - imagePullSecrets
+  - nodeSelector
+  - schedulerName
+  - tolerations
+  - priorityClassName
+  - priority
+  - securityContext
+
+#### spec.podTemplate.spec.tolerations
+
+The `spec.podTemplate.spec.tolerations` is an optional field used to specify the pod's tolerations.
+
+#### spec.podTemplate.spec.volumes
+
+The `spec.podTemplate.spec.volumes` is an optional field used to provide the list of volumes that can be mounted by containers belonging to the pod.
+
+#### spec.podTemplate.spec.podPlacementPolicy
+
+`spec.podTemplate.spec.podPlacementPolicy` is an optional field used to provide the reference of the `podPlacementPolicy`. The `name` of the podPlacementPolicy is referred under this attribute. This will be used by the PetSet controller to place the DB2 pods throughout the region, zone & nodes according to the policy.
+
+```yaml
+spec:
+  podPlacementPolicy:
+    name: default
+```
+
+#### spec.podTemplate.spec.nodeSelector
+
+`spec.podTemplate.spec.nodeSelector` is an optional field that specifies a map of key-value pairs. For the pod to be eligible to run on a node, the node must have each of the indicated key-value pairs as labels.
+
+#### spec.podTemplate.spec.containers
+
+The `spec.podTemplate.spec.containers` can be used to provide the list of containers and their configurations for the database pod.
+
+##### spec.podTemplate.spec.containers[].name
+
+The `spec.podTemplate.spec.containers[].name` field specifies the name of the container as a DNS_LABEL. Each container in a pod must have a unique name.
+
+##### spec.podTemplate.spec.containers[].env
+
+`spec.podTemplate.spec.containers[].env` is an optional field that specifies environment variables to pass to the DB2 containers.
+
+##### spec.podTemplate.spec.containers[].resources
+
+`spec.podTemplate.spec.containers[].resources` is an optional field used to request compute resources (CPU and memory) required by containers of the database pods.
+
+### spec.serviceTemplates
+
+You can provide templates for the services created by KubeDB operator for DB2 through `spec.serviceTemplates`. This allows you to set the type and other properties of the services.
+
+KubeDB allows following fields to set in `spec.serviceTemplates`:
+
+- `alias` represents the identifier of the service (typically `primary`)
+- metadata:
+    - labels
+    - annotations
+- spec:
+    - type
+    - ports
+    - clusterIP
+    - externalIPs
+    - loadBalancerIP
+    - externalTrafficPolicy
+
+### spec.deletionPolicy
+
+`deletionPolicy` gives flexibility to control what happens when you delete a DB2 CRD. KubeDB provides following deletion policies:
+
+- DoNotTerminate
+- WipeOut
+- Halt
+- Delete
+
+When `deletionPolicy` is `DoNotTerminate`, KubeDB takes advantage of `ValidationWebhook` feature in Kubernetes to prevent deletion of the database as long as the policy is set to `DoNotTerminate`.
+
+## Next Steps
+
+- Learn how to use KubeDB to run DB2 [here](/docs/guides/db2/README.md).
+- Want to hack on KubeDB? Check our [contribution guidelines](/docs/CONTRIBUTING.md).
+
+---
+title: DB2 Quickstart
+menu:
+  docs_{{ .version }}:
+    identifier: db2-quickstart-overview
+    name: Overview
+    parent: db2-quickstart-db2
+    weight: 10
+menu_name: docs_{{ .version }}
+section_menu_id: guides
+---
+
+> New to KubeDB? Please start [here](/docs/README.md).
+
+# Running DB2
+
+This tutorial shows how to run a DB2 database with KubeDB.
+
+> Note: YAML files used in this tutorial are stored in [docs/examples/db2/quickstart](https://github.com/kubedb/docs/tree/{{< param "info.version" >}}/docs/examples/db2/quickstart).
+
+## Before You Begin
+
+- You need a Kubernetes cluster, and the `kubectl` command-line tool must be configured to communicate with your cluster. If you do not already have a cluster, you can create one by using [kind](https://kind.sigs.k8s.io/docs/user/quick-start/).
+
+- Install KubeDB following the setup guide: [/docs/setup/README.md](/docs/setup/README.md).
+
+- To keep things isolated, this tutorial uses a separate namespace called `demo` throughout this tutorial.
+
+```bash
+$ kubectl create namespace demo
+namespace/demo created
+
+$ kubectl get ns demo
+NAME    STATUS   AGE
+demo    Active   5s
+```
+
+## Check Available StorageClass
+
+First, check the available StorageClasses in your cluster:
+
+```bash
+$ kubectl get storageclass
+NAME                 PROVISIONER             RECLAIM POLICY   STATUS   AGE
+standard             kubernetes.io/host-path Delete           Bound    30s
+fast-ssd             kubernetes.io/host-path Delete           Bound    30s
+```
+
+This tutorial will use the `standard` StorageClass.
+
+## Check Available DB2Version
+
+List all available DB2 versions that can be deployed with KubeDB:
+
+```bash
+$ kubectl get db2versions
+NAME    VERSION   DB_IMAGE              COORDINATOR_IMAGE                    DEPRECATED
+11.5.8.0  11.5.8.0   kubedb/db2:11.5.8.0    ghcr.io/kubedb/db2-coordinator:...   false
+```
+
+## Create a DB2 Database
+
+Here's the YAML manifest for creating a standalone DB2 instance:
+
+```yaml
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: db2
+  namespace: demo
+spec:
+  version: 11.5.8.0
+  storageType: Durable
+  storage:
+    storageClassName: standard
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  deletionPolicy: Delete
+```
+
+Apply the example manifest:
+
+```bash
+$ kubectl apply -f https://github.com/kubedb/docs/raw/{{< param "info.version" >}}/docs/examples/db2/quickstart/standalone.yaml
+db2.kubedb.com/db2 created
+```
+
+KubeDB operator will create the necessary PetSet, Service, and other resources. Let's wait for the DB2 instance to be ready:
+
+```bash
+$ kubectl get db2 -n demo db2 -w
+NAME   VERSION   STATUS    AGE
+db2    11.5.8.0    Running   2m
+```
+
+Now, you can press `Ctrl+C` to stop the watch command.
+
+## Verify DB2 Database
+
+Check that the DB2 instance is up and running:
+
+```bash
+$ kubectl get db2 -n demo
+NAME   VERSION   STATUS    AGE
+db2    11.5.8.0    Running   3m
+```
+
+To verify the database is ready, use `describe` command:
+
+```bash
+$ kubectl describe db2 -n demo db2
+Name:         db2
+Namespace:    demo
+Labels:       <none>
+Annotations:  <none>
+API Version:  kubedb.com/v1alpha2
+Kind:         DB2
+...
+Spec:
+  Version:            11.5.8.0
+  Storage Type:       Durable
+  Deletion Policy:    Delete
+  ...
+Status:
+  Conditions:
+    Last Transition Time:  2025-01-09T12:05:51Z
+    Status:                True
+    Type:                  Ready
+  Phase:                   Ready
+```
+
+When `status.phase` is `Ready`, your DB2 database is ready to use.
+
+## Check DB2 Pod
+
+Check that the DB2 pod is running:
+
+```bash
+$ kubectl get pod -n demo
+NAME       READY   STATUS    RESTARTS   AGE
+db2-0      1/1     Running   0          3m
+```
+
+## Get Database Credentials
+
+Get the generated credentials for connecting to the DB2 database:
+
+```bash
+$ kubectl get secret -n demo db2-auth -o jsonpath='{.data.username}' | base64 -d
+db2inst1
+
+$ kubectl get secret -n demo db2-auth -o jsonpath='{.data.password}' | base64 -d
+your-generated-password
+```
+
+## Access the Database
+
+Let's access the DB2 database to verify it's working. First, port-forward the service:
+
+```bash
+$ kubectl port-forward -n demo svc/db2 50000:50000
+Forwarding from 127.0.0.1:50000 -> 50000
+Forwarding from [::1]:50000 -> 50000
+```
+
+Now you can connect to the database using a DB2 client. Here's an example using the DB2 command line:
+
+```bash
+$ db2 connect to testdb user db2inst1 using <password>
+```
+
+Or you can check the pod logs to verify database operations:
+
+```bash
+$ kubectl logs -f -n demo db2-0
+```
+
+## View Service & PVC
+
+Check the Service and PersistentVolumeClaim created by KubeDB:
+
+```bash
+$ kubectl get svc -n demo
+NAME       TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)     AGE
+db2        ClusterIP   10.96.28.88   <none>        50000/TCP   3m
+```
+
+```bash
+$ kubectl get pvc -n demo
+NAME      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+db2-0     Bound    pvc-a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4g5h6i   10Gi       RWO            standard       3m
+```
+
+## Delete the Database
+
+To delete the DB2 database, use the following command:
+
+```bash
+$ kubectl delete db2 -n demo db2
+db2.kubedb.com "db2" deleted
+```
+
+The PVC will also be deleted due to the `deletionPolicy: Delete` setting:
+
+```bash
+$ kubectl get pvc -n demo
+No resources found in demo namespace.
+```
+
+## Cleaning up
+
+```bash
+$ kubectl delete namespace demo
+namespace "demo" deleted
+```
+
+## Next Steps
+
+- Learn about the [DB2 CRD](/docs/guides/db2/concepts/db2.md).
+- Learn about the [DB2Version CRD](/docs/guides/db2/concepts/catalog.md).
+- Learn about [custom RBAC](/docs/guides/db2/custom-rbac/using-custom-rbac.md) for DB2.
+- Learn about using [private registry](/docs/guides/db2/private-registry/using-private-registry.md) with DB2.
+- Want to hack on KubeDB? Check our [contribution guidelines](/docs/CONTRIBUTING.md).
+
+
+
+---
+title: DB2
+menu:
+  docs_{{ .version }}:
+    identifier: db2-readme
+    name: DB2
+    parent: db2-guides
+    weight: 10
+menu_name: docs_{{ .version }}
+section_menu_id: guides
+url: /docs/{{ .version }}/guides/db2/
+aliases:
+  - /docs/{{ .version }}/guides/db2/README/
+---
+
+> New to KubeDB? Please start [here](/docs/README.md).
+
+# Overview
+
+KubeDB supports IBM DB2 using the `DB2` Custom Resource Definition (CRD). You can declare the desired DB2 configuration, and KubeDB provisions and manages the required Kubernetes resources.
+
+KubeDB simplifies deploying and managing DB2 on Kubernetes with a declarative API. It automates common operational tasks such as:
+
+- Creating and provisioning standalone DB2 instances
+- Managing persistent storage and data recovery
+- Handling authentication and authorization
+- Customizing pod templates and service configurations
+- Monitoring database health
+
+## Supported DB2 Features
+
+| Features                       | Availability |
+|--------------------------------|:------------:|
+| Standalone DB2 deployment      |   &#10003;   |
+| Persistent volume              |   &#10003;   |
+| Authentication secret          |   &#10003;   |
+| Pod and service customization  |   &#10003;   |
+| Health checker                 |   &#10003;   |
+| Custom RBAC                    |   &#10003;   |
+| Private registry               |   &#10003;   |
+
+
+## Example DB2 Manifest
+
+Here's a simple example of a DB2 deployment:
+
+```yaml
+apiVersion: kubedb.com/v1alpha2
+kind: DB2
+metadata:
+  name: db2
+  namespace: demo
+spec:
+  version: 11.5.8.0
+  storageType: Durable
+  storage:
+    storageClassName: standard
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  deletionPolicy: Delete
+  healthChecker:
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 3
+```
+
+For a complete list of available configuration options, see the [DB2 CRD Documentation](/docs/guides/db2/concepts/db2.md).
+
+## User Guide
+
+Learn about DB2 features and how to use them:
+
+### Quickstart
+- [Quickstart](/docs/guides/db2/quickstart/quickstart.md) - Deploy your first DB2 instance with KubeDB operator
+
+### Concepts
+- [DB2 CRD](/docs/guides/db2/concepts/db2.md) - Understand the DB2 Custom Resource Definition and all available configuration options
+- [DB2Version CRD](/docs/guides/db2/concepts/catalog.md) - Learn about specifying DB2 versions and docker images
+
+### Setup & Configuration
+- [Custom RBAC](/docs/guides/db2/custom-rbac/using-custom-rbac.md) - Setup custom ServiceAccount, Role, and RoleBinding for DB2 instances
+- [Using Private Registry](/docs/guides/db2/private-registry/using-private-registry.md) - Deploy DB2 using images from a private docker registry
+
+
+
+
+
+
